@@ -1,0 +1,1010 @@
+================================================================================
+                           LOOP LOYALTY API DOCUMENTATION
+                              (Full API Reference)
+================================================================================
+
+Base URL: https://localhost:5001/api
+Tech Stack: ASP.NET Core 10, C#, Entity Framework Core, PostgreSQL, JWT Auth
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+  1.  Authentication (Users)
+       1.1.  POST /api/auth/login
+       1.2.  POST /api/auth/refresh
+       1.3.  POST /api/auth/logout
+       1.4.  POST /api/auth/forgot-password
+       1.5.  POST /api/auth/reset-password
+  2.  Shop Admin Authentication
+       2.1.  POST /api/shop-admins/login
+       2.2.  POST /api/shop-admins/refresh
+  3.  Shops
+       3.1.  GET /api/shops
+       3.2.  GET /api/shops/{shopId}
+  4.  Categories
+       4.1.  GET /api/categories
+  5.  Offers
+       5.1.  GET /api/offers
+       5.2.  GET /api/offers/{mallId}/{shopId}
+  6.  Stamps
+       6.1.  GET /api/stamps
+       6.2.  GET /api/stamps/completed
+       6.3.  POST /api/stamps/{stampId}/redemption-qr
+       6.4.  POST /api/stamps/redemption-qr/confirm (ShopAdmin)
+       6.5.  GET /api/stamps/active (ShopAdmin)
+       6.6.  POST /api/stamps/{stampId}/collection-qr (ShopAdmin)
+       6.7.  POST /api/stamps/collection-qr/scan
+  7.  Users
+       7.1.  POST /api/users/register
+       7.2.  GET /api/users/{id}
+       7.3.  GET /api/users/me
+       7.4.  GET /api/users/points/balance
+       7.5.  POST /api/users/points (AddPoints)
+       7.6.  PUT /api/users/me (UpdateProfile)
+       7.7.  POST /api/users/profile-image (UploadImage)
+       7.8.  POST /api/users/points/redemption-qr
+  8.  Shop Admin Points
+       8.1.  POST /api/shop-admins/points/redemption-qr/confirm
+  9.  User Stamp Cards
+       9.1.  GET /api/users/stamp-cards
+  10. Receipts
+      10.1.  POST /api/receipts/ocr
+  11. Authentication & Authorization Flow
+  12. Domain Models
+  13. Error Codes
+
+================================================================================
+1. AUTHENTICATION (Regular Users)
+================================================================================
+
+All UserOnly endpoints require a Bearer JWT with the "user_id" claim.
+
+----------------------------------------------------------------------
+1.1. POST /api/auth/login
+----------------------------------------------------------------------
+  Authenticate a regular user and receive JWT + refresh token.
+
+  REQUEST (Body - JSON):
+  {
+    "email": "user@example.com",
+    "password": "your-password"
+  }
+
+  VALIDATION:
+  - Email: must be a valid email address, not empty
+  - Password: minimum 8 characters, not empty
+
+  RESPONSE 200 OK (AuthTokensResponse):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "3C5k9f2A..."
+  }
+
+  RESPONSE 400 Bad Request:
+  - Invalid email format
+  - Invalid credentials
+
+----------------------------------------------------------------------
+1.2. POST /api/auth/refresh
+----------------------------------------------------------------------
+  Refresh an expired user access token.
+
+  REQUEST (Body - JSON):
+  {
+    "refreshToken": "3C5k9f2A..."
+  }
+
+  RESPONSE 200 OK (AuthTokensResponse):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "8xRm2pQz..."
+  }
+
+  RESPONSE 400 Bad Request:
+  - Invalid or expired refresh token
+
+----------------------------------------------------------------------
+1.3. POST /api/auth/logout
+----------------------------------------------------------------------
+  Invalidate the current user session. Deletes all sessions for the user.
+
+  HEADERS: Authorization: Bearer <accessToken>
+
+  RESPONSE 204 No Content
+
+  RESPONSE 400 Bad Request
+
+----------------------------------------------------------------------
+1.4. POST /api/auth/forgot-password
+----------------------------------------------------------------------
+  Request a password reset token (sent via email).
+
+  REQUEST (Body - JSON):
+  {
+    "email": "user@example.com"
+  }
+
+  RESPONSE 202 Accepted (string): Generic success message
+
+  RESPONSE 400 Bad Request
+
+----------------------------------------------------------------------
+1.5. POST /api/auth/reset-password
+----------------------------------------------------------------------
+  Reset password using a reset token.
+
+  REQUEST (Body - JSON):
+  {
+    "email": "user@example.com",
+    "resetToken": "reset-token-value",
+    "newPassword": "new-password"
+  }
+
+  RESPONSE 204 No Content
+
+  RESPONSE 400 Bad Request:
+  - Invalid token
+  - Token expired
+  - Password too short
+
+================================================================================
+2. SHOP ADMIN AUTHENTICATION
+================================================================================
+
+All ShopAdminOnly endpoints require a Bearer JWT with the "shop_admin_id" claim.
+
+----------------------------------------------------------------------
+2.1. POST /api/shop-admins/login
+----------------------------------------------------------------------
+  Authenticate a shop admin and receive JWT + refresh token.
+
+  REQUEST (Body - JSON):
+  {
+    "email": "shop.admin@loop.local",
+    "password": "your-password"
+  }
+
+  VALIDATION:
+  - Email: must be a valid email address, not empty
+  - Password: minimum 8 characters, not empty
+
+  RESPONSE 200 OK (AuthTokensResponse):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "3C5k9f2A..."
+  }
+
+  RESPONSE 400 Bad Request:
+  - Invalid email format
+  - Admin not found by email (generic message)
+  - Incorrect password (same generic message)
+
+  JWT claims: sub (ShopAdminId), email, shop_admin_id, shop_id
+
+----------------------------------------------------------------------
+2.2. POST /api/shop-admins/refresh
+----------------------------------------------------------------------
+  Refresh an expired shop admin access token. Rotates both tokens.
+
+  REQUEST (Body - JSON):
+  {
+    "refreshToken": "3C5k9f2A..."
+  }
+
+  RESPONSE 200 OK (AuthTokensResponse):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "8xRm2pQz..."
+  }
+
+  RESPONSE 400 Bad Request:
+  - Invalid or expired refresh token
+
+================================================================================
+3. SHOPS (UserOnly)
+================================================================================
+
+----------------------------------------------------------------------
+3.1. GET /api/shops
+----------------------------------------------------------------------
+  Get a list of active shops in a mall.
+
+  HEADERS:
+    X-Mall-Id: guid (required)
+
+  QUERY PARAMETERS:
+    categoryId: guid (optional) - Filter by category
+    searchTerm: string (optional) - Case-insensitive name search
+
+  RESPONSE 200 OK:
+  [
+    {
+      "shopId": "guid",
+      "shopName": "Loop Coffee",
+      "categoryName": "Coffee",
+      "shopImageUrl": "https://..."
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+3.2. GET /api/shops/{shopId}
+----------------------------------------------------------------------
+  Get detailed information about a specific active shop.
+
+  HEADERS:
+    X-Mall-Id: guid (required)
+
+  PATH PARAMETERS:
+    shopId: guid (required)
+
+  RESPONSE 200 OK:
+  {
+    "shopName": "Loop Coffee",
+    "categoryName": "Coffee",
+    "logoUrl": "https://...",
+    "coverUrl": "https://...",
+    "websiteLink": "https://...",
+    "socialLinks": [
+      { "name": "Instagram", "link": "https://instagram.com/..." }
+    ]
+  }
+
+  RESPONSE 404 Not Found: Shop not found or inactive
+
+================================================================================
+4. CATEGORIES (UserOnly)
+================================================================================
+
+----------------------------------------------------------------------
+4.1. GET /api/categories
+----------------------------------------------------------------------
+  Get all categories for a mall.
+
+  QUERY PARAMETERS:
+    mallId: guid (required)
+
+  RESPONSE 200 OK:
+  [
+    {
+      "categoryId": "guid",
+      "categoryName": "Coffee"
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+================================================================================
+5. OFFERS (UserOnly)
+================================================================================
+
+----------------------------------------------------------------------
+5.1. GET /api/offers?mallId={mallId}
+----------------------------------------------------------------------
+  Get offers grouped by shop category within a mall.
+  Excludes offers already redeemed by the current user.
+
+  QUERY PARAMETERS:
+    mallId: guid (required)
+
+  RESPONSE 200 OK:
+  [
+    {
+      "categoryName": "Coffee",
+      "offers": [
+        {
+          "shopName": "Loop Coffee",
+          "offerDescription": "20% off on all drinks",
+          "coverImageUrl": "https://..."
+        }
+      ]
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+5.2. GET /api/offers/{mallId}/{shopId}
+----------------------------------------------------------------------
+  Get offers for a specific shop.
+
+  PATH PARAMETERS:
+    mallId: guid (required)
+    shopId: guid (required)
+
+  RESPONSE 200 OK:
+  [
+    {
+      "offerDescription": "20% off on all drinks",
+      "coverImageUrl": "https://...",
+      "isRedeemed": false
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+================================================================================
+6. STAMPS
+================================================================================
+
+----------------------------------------------------------------------
+6.1. GET /api/stamps?mallId={mallId}&shopId={shopId}
+----------------------------------------------------------------------
+  Get all stamps for a specific shop with user's progress.
+  Policy: UserOnly
+
+  QUERY PARAMETERS:
+    mallId: guid (required)
+    shopId: guid (required)
+
+  RESPONSE 200 OK:
+  [
+    {
+      "stampName": "Buy 5 Coffees",
+      "stampsCounter": 3,
+      "iconUrl": "https://...",
+      "stampsRequired": 5,
+      "stampDescription": "Get a free coffee after 5 purchases",
+      "isComplete": false
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+6.2. GET /api/stamps/completed
+----------------------------------------------------------------------
+  Get completed stamps that have NOT yet been redeemed.
+  Policy: UserOnly
+
+  RESPONSE 200 OK:
+  [
+    {
+      "stampId": "guid",
+      "shopName": "Loop Coffee",
+      "iconUrl": "https://...",
+      "stampDescription": "Get a free coffee after 5 purchases"
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+6.3. POST /api/stamps/{stampId}/redemption-qr
+----------------------------------------------------------------------
+  Generate a stamp redemption QR code (for the user to present to the admin).
+  Policy: UserOnly
+  QR code expires in 2 minutes. Stamp card must be completed.
+
+  PATH PARAMETERS:
+    stampId: guid (required)
+
+  RESPONSE 200 OK:
+  {
+    "qrId": "guid",
+    "expiresAtUtc": "2026-05-15T19:59:00Z"
+  }
+
+  RESPONSE 400 Bad Request
+
+----------------------------------------------------------------------
+6.4. POST /api/stamps/redemption-qr/confirm
+----------------------------------------------------------------------
+  Confirm stamp redemption (admin scans user's QR).
+  Policy: ShopAdminOnly
+
+  REQUEST (Body - JSON):
+  {
+    "qrId": "guid"
+  }
+
+  RESPONSE 200 OK: true
+
+  RESPONSE 400 Bad Request:
+  - QR code not found, expired, or already used
+  - Invalid QR payload / shop mismatch
+  - Stamp card not found or not completed
+
+----------------------------------------------------------------------
+6.5. GET /api/stamps/active
+----------------------------------------------------------------------
+  Get all active stamps for the authenticated admin's shop.
+  Policy: ShopAdminOnly
+
+  HEADERS: Authorization: Bearer <accessToken>
+
+  RESPONSE 200 OK:
+  [
+    {
+      "stampId": "guid",
+      "stampName": "Buy 5 Coffees",
+      "stampDescription": "Get a free coffee after 5 purchases",
+      "imageUrl": "https://...",
+      "iconUrl": "https://...",
+      "stampsRequired": 5,
+      "rewardType": "Collect",
+      "startDate": "2025-01-01T00:00:00Z",
+      "endDate": "2025-12-31T23:59:59Z"
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+6.6. POST /api/stamps/{stampId}/collection-qr?stampsCount={count}
+----------------------------------------------------------------------
+  Generate a collect QR code (admin shows to user for scanning).
+  Policy: ShopAdminOnly
+  QR code expires in 2 minutes.
+
+  PATH PARAMETERS:
+    stampId: guid (required)
+
+  QUERY PARAMETERS:
+    stampsCount: int (optional, default: 1)
+
+  RESPONSE 200 OK:
+  {
+    "qrId": "guid",
+    "expiresAtUtc": "2026-05-15T19:59:00Z"
+  }
+
+  RESPONSE 400 Bad Request:
+  - Stamp not found or not active for this shop
+  - stampsCount is zero or negative
+
+----------------------------------------------------------------------
+6.7. POST /api/stamps/collection-qr/scan
+----------------------------------------------------------------------
+  Scan a stamp collect QR code (user scans admin's QR).
+  Policy: UserOnly
+
+  REQUEST (Body - JSON):
+  {
+    "qrId": "guid"
+  }
+
+  RESPONSE 200 OK:
+  {
+    "stampId": "guid",
+    "stampsCounter": 3,
+    "isCompleted": false
+  }
+
+  RESPONSE 400 Bad Request:
+  - QR code not found, expired, or already used
+  - Invalid QR payload
+
+================================================================================
+7. USERS
+================================================================================
+
+----------------------------------------------------------------------
+7.1. POST /api/users/register
+----------------------------------------------------------------------
+  Register a new user account.
+  Policy: Anonymous
+
+  REQUEST (Body - JSON):
+  {
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "phone": "+1234567890",
+    "gender": "Male",
+    "password": "your-password"
+  }
+
+   VALIDATION:
+   - FirstName, LastName, Email, Phone, Gender: required, not empty
+   - Email: must be valid email format
+   - Password: minimum 8 characters
+   - Gender: string "Male" or "Female" (note: PUT /api/users/me uses integer 1/2)
+
+   RESPONSE 201 Created: Returns the new user's GUID
+
+  RESPONSE 400 Bad Request
+
+----------------------------------------------------------------------
+7.2. GET /api/users/{id}
+----------------------------------------------------------------------
+  Get user by ID.
+  Policy: UserOnly
+  Returns Unauthorized if requesting a user ID different from the authenticated user.
+
+  PATH PARAMETERS:
+    id: guid (required)
+
+  RESPONSE 200 OK:
+  {
+    "id": "guid",
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "phone": "+1234567890",
+    "gender": "Male",
+    "profileImageUrl": "https://..."
+  }
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+7.3. GET /api/users/me
+----------------------------------------------------------------------
+  Get the currently authenticated user's details.
+  Policy: UserOnly
+
+  RESPONSE 200 OK: (same UserResponse shape as GET /api/users/{id})
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+7.4. GET /api/users/points/balance?mallId={mallId}
+----------------------------------------------------------------------
+  Get the current user's points balance in a specific mall.
+  Policy: UserOnly
+
+  QUERY PARAMETERS:
+    mallId: guid (required)
+
+  RESPONSE 200 OK:
+  {
+    "totalPoints": 150,
+    "evaluatedValue": 15.50
+  }
+
+  EvaluatedValue = TotalPoints / systemConfig.PointsToCurrencyRatio
+
+  RESPONSE 404 Not Found
+
+----------------------------------------------------------------------
+7.5. POST /api/users/points
+----------------------------------------------------------------------
+  Add points to the current user.
+  Policy: UserOnly
+
+  REQUEST (Body - JSON):
+  {
+    "amount": 50
+  }
+
+  VALIDATION:
+  - Amount: must be >= 1
+
+  RESPONSE 200 OK: true
+
+  RESPONSE 400 Bad Request / 404 Not Found
+
+----------------------------------------------------------------------
+7.6. PUT /api/users/me
+----------------------------------------------------------------------
+  Update the current user's profile.
+  Policy: UserOnly
+
+   REQUEST (Body - JSON):
+   {
+     "firstName": "John",
+     "lastName": "Doe",
+     "phone": "+1234567890",
+     "gender": 1,
+     "profileImageUrl": "https://..."
+   }
+
+   VALIDATION:
+   - At least one field must be provided
+   - Max lengths: FirstName/LastName 100, Phone 20, ProfileImageUrl 512
+   - Phone: max 20 characters if provided
+   - Gender: 1 (Male) or 2 (Female) — integer, not string
+
+   RESPONSE 200 OK: UserResponse object
+
+  RESPONSE 400 Bad Request / 404 Not Found
+
+----------------------------------------------------------------------
+7.7. POST /api/users/profile-image
+----------------------------------------------------------------------
+  Upload a profile image for the current user.
+  Policy: UserOnly
+  Content-Type: multipart/form-data
+
+  REQUEST (Form-Data):
+    ImageFile: file (required)
+
+   VALIDATION:
+   - Allowed formats: jpeg, png, gif, webp
+   - Max file size: 5 MB
+
+   RESPONSE 200 OK: true (bool)
+
+   RESPONSE 400 Bad Request / 401 Unauthorized / 404 Not Found
+
+----------------------------------------------------------------------
+7.8. POST /api/users/points/redemption-qr
+----------------------------------------------------------------------
+  Generate a points redemption QR code (for user to present to admin).
+  Policy: UserOnly
+  QR code expires in 2 minutes. Validates sufficient points.
+
+  REQUEST (Body - JSON):
+  {
+    "pointsToRedeem": 100
+  }
+
+  RESPONSE 200 OK:
+  {
+    "qrId": "guid",
+    "expiresAtUtc": "2026-05-15T19:59:00Z"
+  }
+
+  RESPONSE 400 Bad Request
+
+================================================================================
+8. SHOP ADMIN POINTS
+================================================================================
+
+----------------------------------------------------------------------
+8.1. POST /api/shop-admins/points/redemption-qr/confirm
+----------------------------------------------------------------------
+  Confirm a points redemption (admin scans user's QR).
+  Policy: ShopAdminOnly
+  Validates QR, checks sufficient points & min threshold, calculates discount,
+  debits user points, credits shop wallet.
+
+  REQUEST (Body - JSON):
+  {
+    "qrId": "guid"
+  }
+
+  RESPONSE 200 OK: true
+
+  RESPONSE 400 Bad Request:
+  - QR code not found, expired, or invalid
+  - Insufficient points or below minimum threshold
+  - Transaction verification failed
+
+================================================================================
+9. USER STAMP CARDS (UserOnly)
+================================================================================
+
+----------------------------------------------------------------------
+9.1. GET /api/users/stamp-cards
+----------------------------------------------------------------------
+  Get all non-completed stamp cards for the authenticated user.
+
+  RESPONSE 200 OK:
+  [
+    {
+      "stampId": "guid",
+      "shopName": "Loop Coffee",
+      "stampName": "Buy 5 Coffees",
+      "stampsCounter": 3,
+      "iconUrl": "https://...",
+      "stampsRequired": 5,
+      "stampDescription": "Get a free coffee after 5 purchases"
+    }
+  ]
+
+  RESPONSE 404 Not Found
+
+================================================================================
+10. RECEIPTS (UserOnly)
+================================================================================
+
+----------------------------------------------------------------------
+10.1. POST /api/receipts/ocr
+----------------------------------------------------------------------
+  Upload a receipt image for OCR processing. Checks for duplicate uploads
+  by SHA-256 hash. Auto-credits points if IsPendingReview=false.
+  Content-Type: multipart/form-data
+
+  HEADERS:
+    X-Mall-Id: guid (required)
+
+  REQUEST (Form-Data):
+    file: image file (required, jpeg/png/gif/webp)
+
+  RESPONSE 200 OK:
+  {
+    "storeName": "Loop Coffee",
+    "merchantName": "Loop Coffee Downtown",
+    "items": [
+      {
+        "name": "Latte",
+        "quantity": 1.0,
+        "unitPrice": 4.50,
+        "totalPrice": 4.50
+      }
+    ],
+    "subtotal": 4.50,
+    "currency": "USD",
+    "isPendingReview": false,
+    "rawText": "...",
+    "matchedShopId": "guid",
+    "matchedShopName": "Loop Coffee",
+    "matchScore": 0.95
+  }
+
+  RESPONSE 400 Bad Request / 404 Not Found
+
+================================================================================
+11. AUTHENTICATION & AUTHORIZATION FLOW
+================================================================================
+
+A. JWT Token Creation
+   - Shop Admin JWT claims:
+       sub           = ShopAdminId (string)
+       email         = ShopAdmin.Email.Value
+       shop_admin_id = ShopAdminId (guid string)
+       shop_id       = ShopAdmin.ShopId (guid string)
+   - Regular User JWT claims:
+       sub     = UserId
+       email   = User.Email.Value
+       user_id = UserId
+   - Signing: HMAC-SHA256 with configurable secret
+   - JWT Expiration: configurable via Jwt:ExpirationInMinutes (default 60 min)
+
+B. Authorization Policies
+   - "ShopAdminOnly": Requires authenticated user with "shop_admin_id" claim
+   - "UserOnly": Requires authenticated user with "user_id" claim
+
+C. Auth Sequence (Shop Admin):
+   1. POST /api/shop-admins/login -> receive accessToken + refreshToken
+   2. Include accessToken in Authorization: Bearer header
+   3. When JWT expires, POST /api/shop-admins/refresh with refreshToken
+   4. Server rotates: deletes old session, creates new one
+
+D. QR Token Providers:
+   - StampCollectionQrTokenProvider: {tokenId, stampId, shopId, stampsCount, expiresAtUtc}
+   - StampRedemptionQrTokenProvider: {userId, stampId, shopId, expiresAtUtc}
+   - PointsRedemptionQrTokenProvider: {userId, pointsToRedeem, expiresAtUtc}
+
+================================================================================
+12. DOMAIN MODELS
+================================================================================
+
+Shop
+----
+  ShopId          : Guid (PK)
+  MallId          : Guid (FK -> Mall)
+  Name            : string (unique, max 200)
+  CategoryId      : Guid (FK -> Category)
+  LogoUrl         : string (max 512)
+  CoverImageUrl   : string (max 512)
+  Bio             : string (text)
+  WebsiteUrl      : string? (max 512)
+  SocialLinks     : string? (JSON serialized)
+  IsActive        : bool (default: true)
+  CreatedAt       : DateTime (default: UtcNow)
+
+ShopAdmin
+---------
+  ShopAdminId     : Guid (PK)
+  ShopId          : Guid (FK -> Shop)
+  Name            : string
+  Email           : Email (value object, unique)
+  Phone           : Phone (value object, unique)
+  PasswordHash    : string (BCrypt)
+  IsActive        : bool
+  CreatedAt       : DateTime
+
+ShopAdminSession
+----------------
+  ShopAdminSessionId : Guid (PK)
+  ShopAdminId        : Guid (FK -> ShopAdmin)
+  RefreshTokenHash   : string (unique)
+  ExpiresAtUtc       : DateTime
+  CreatedAt          : DateTime
+
+Category
+--------
+  CategoryId    : Guid (PK)
+  MallId        : Guid (FK -> Mall)
+  Name          : string (unique per mall)
+  IconUrl       : string
+  DisplayOrder  : int
+  Description   : string
+  CreatedAt     : DateTime
+
+ShopPointsWallet
+----------------
+  ShopPointsWalletId : Guid (PK)
+  ShopId             : Guid (FK -> Shop)
+  PointsReceived     : int
+  LastUpdated        : DateTime
+
+User
+----
+  UserId          : Guid (PK)
+  Email           : Email (value object, unique)
+  FirstName       : string
+  LastName        : string
+  Phone           : Phone (value object, unique)
+  Gender          : Gender enum (Male=1, Female=2)
+  PasswordHash    : string (BCrypt)
+  ProfileImageUrl : string?
+  TierId          : Guid (FK -> Tier)
+  IsActive        : bool
+  CreatedAt       : DateTime
+
+UserPointsBalance
+-----------------
+  UserPointsBalanceId : Guid (PK)
+  UserId              : Guid (FK -> User)
+  TotalPoints         : int
+  LifetimePoints      : int
+  LastUpdated         : DateTime
+
+Stamp
+-----
+  StampId         : Guid (PK)
+  ShopId          : Guid (FK -> Shop)
+  Name            : string
+  Description     : string
+  ImageUrl        : string?
+  StampIconUrl    : string?
+  StampsRequired  : int
+  RewardType      : StampType enum (Collect=1, Reward=2)
+  StartDate       : DateTime
+  EndDate         : DateTime
+  IsActive        : bool
+
+UserStampCard
+-------------
+  CardId          : Guid (PK)
+  UserId          : Guid (FK -> User)
+  StampId         : Guid (FK -> Stamp)
+  StampsCounter   : int
+  IsCompleted     : bool
+  CompletedAt     : DateTime?
+  LastTransaction : DateTime?
+  CreatedAt       : DateTime
+
+StampTransaction
+----------------
+  StampTxId       : Guid (PK)
+  UserId          : Guid (FK -> User)
+  ShopId          : Guid (FK -> Shop)
+  StampProgramId  : Guid (FK -> Stamp)
+  Type            : StampType enum
+  StampsCount     : int
+  RedemptionRef   : Guid?
+  RedemptionQrCode: string?
+  CreatedAt       : DateTime
+
+StampRedemption
+---------------
+  RedemptionId    : Guid (PK)
+  UserId          : Guid (FK -> User)
+  ShopId          : Guid (FK -> Shop)
+  StampId         : Guid (FK -> Stamp)
+  QrId            : Guid
+  CreatedAt       : DateTime
+
+QrCode
+------
+  QrId          : Guid (PK)
+  UserId        : Guid? (FK -> User)
+  ShopId        : Guid? (FK -> Shop)
+  QrCodeData    : string (serialized token JSON)
+  ExpiresAt     : DateTime
+  CreatedAt     : DateTime
+
+Receipt
+-------
+  ReceiptId     : Guid (PK)
+  ReceiptPath   : string
+  ShopId        : Guid (FK -> Shop)
+  UserId        : Guid (FK -> User)
+  Amount        : Money (value object: Amount decimal, Currency string)
+  ReceiptDetails: string (JSON)
+  Status        : ReceiptStatus enum (Pending=0, Approved=1, Rejected=2)
+  ImageHash     : string (SHA-256, unique)
+  CreatedAt     : DateTime
+
+RedeemTransaction
+-----------------
+  RedeemId                    : Guid (PK)
+  UserId                      : Guid
+  ShopId                      : Guid
+  PointsUsed                  : int
+  DiscountValue                : decimal
+  AppliedPointsToCurrencyRatio : decimal
+  Status                      : RedemptionStatus enum (Pending=1, Verified=2, Cancelled=3)
+  CompletedAt                 : DateTime?
+
+Offer
+-----
+  (Defined in Loop.Domain.Offers)
+
+SystemConfig
+------------
+  (Per-mall configuration)
+  PointsToCurrencyRatio     : int
+  MinRedemptionThreshold    : int
+  CalculateEarnedPoints(subtotal)
+  CalculateDiscountValue(points)
+
+AuditLog
+--------
+  AuditLogId    : Guid (PK)
+  ActionType    : string
+  UserId        : Guid?
+  ShopId        : Guid?
+  ShopAdminId   : Guid?
+  AdminType     : AdminType enum?
+  Points        : int?
+  Metadata      : string (JSON)
+  CreatedAt     : DateTime
+
+Tier
+----
+  (Loyalty tiers)
+
+Mall
+----
+  (Shopping mall aggregate)
+
+MallAdmin
+---------
+  (Mall administrator)
+
+================================================================================
+13. ERROR CODES
+================================================================================
+
+Domain errors are returned as Error objects with a code and description.
+
+Shop Errors (ShopErrors.cs):
+  Code                                Description
+  ------------------------------------------------------------------
+  Shop.NotFound                       Shop not found by ID
+  Shop.NameNotUnique                  Shop name already exists in mall
+  Shop.ShopInactive                   Shop is deactivated
+  Shop.CategoryNotFound               Category not found
+  Shop.CategoryNameNotUnique          Category name already exists
+  Shop.AdminNotFound                  ShopAdmin not found by ID
+  Shop.AdminNotFoundByEmail           ShopAdmin not found by email / wrong password
+  Shop.AdminEmailNotUnique            Email already in use
+  Shop.AdminPhoneNotUnique            Phone already in use
+  Shop.InvalidRefreshToken            Refresh token invalid or not found
+  Shop.RefreshTokenExpired            Refresh token has expired
+  Shop.QrCodeExpired                  QR code has expired
+
+Stamp Errors (StampErrors.cs):
+  Code                                Description
+  ------------------------------------------------------------------
+  Stamp.NotFound                      Stamp not found
+  Stamp.QrCodeNotFound                QR code not found
+  Stamp.InvalidQrPayload              QR payload is invalid or shop mismatch
+  Stamp.QrCodeExpired                 QR code has expired
+  Stamp.QrCodeAlreadyUsed             QR code has already been redeemed
+  Stamp.CardNotFound                  User stamp card not found
+  Stamp.CardNotCompleted              Stamp card is not yet completed
+
+Transaction Errors (TransactionErrors.cs):
+  Code                                Description
+  ------------------------------------------------------------------
+  Transaction.QrCodeNotFound          QR code not found
+  Transaction.InvalidQrPayload        Invalid QR payload
+  Transaction.QrCodeExpired           QR code has expired
+  Transaction.InsufficientPoints      User does not have enough points
+  Transaction.BelowMinRedemptionThreshold  Points below minimum threshold
+  Transaction.VerificationFailed      Transaction verification failed
+
+User Errors:
+  Code                                Description
+  ------------------------------------------------------------------
+  User.NotFound                       User not found by ID
+  User.EmailNotUnique                 Email already registered
+  User.InvalidCredentials             Invalid email or password
+  User.InvalidResetToken              Password reset token invalid or expired
+
+Audit Errors (AuditLogErrors.cs):
+  Code                                Description
+  ------------------------------------------------------------------
+  AuditLog.NotFound                   Audit log not found
+
+================================================================================
+END OF DOCUMENT
+================================================================================

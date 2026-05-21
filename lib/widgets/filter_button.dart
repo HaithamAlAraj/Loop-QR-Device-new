@@ -28,6 +28,7 @@ class FilterButton extends StatelessWidget {
       onSelected: (_) => onTap(),
       elevation: 0,
       pressElevation: 0,
+      clipBehavior: Clip.antiAlias,
     );
   }
 }
